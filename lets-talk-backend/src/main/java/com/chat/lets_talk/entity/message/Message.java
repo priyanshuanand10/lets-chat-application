@@ -14,6 +14,6 @@ import java.time.LocalDateTime;
 public class Message {
     private String id;
     private String sentBy;
-    private LocalDateTime msgTime;
+//    private LocalDateTime msgTime;
     private String message;
 }

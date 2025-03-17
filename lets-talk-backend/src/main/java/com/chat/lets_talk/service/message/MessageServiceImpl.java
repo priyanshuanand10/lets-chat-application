@@ -38,7 +38,7 @@ public class MessageServiceImpl implements MessageService {
         LocalDateTime now = LocalDateTime.now();
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss");
         String formattedDateTime = now.format(formatter);
-        messageDto.setMsgTime(LocalDateTime.parse(formattedDateTime, formatter));
+//        messageDto.setMsgTime(LocalDateTime.parse(formattedDateTime, formatter));
         Room chats = roomRepo.findByRoomId(roomId).orElseThrow(() -> new CustomException("Record not found", HttpStatus.NOT_FOUND));
         chats.getMessages().add(LTUtility.toEntity(messageDto, Message.class));
         roomRepo.save(chats);
@@ -61,7 +61,7 @@ public class MessageServiceImpl implements MessageService {
         messages.remove(message);
         message.setMessage(messageDto.getMessage());
         messages.add(message);
-        Collections.sort(messages, (o1, o2) -> o1.getMsgTime().isAfter(o2.getMsgTime()) ? 1 : -1);
+//        Collections.sort(messages, (o1, o2) -> o1.getMsgTime().isAfter(o2.getMsgTime()) ? 1 : -1);
         chats.setMessages(messages);
         Room savedChat = roomRepo.save(chats);
         RoomDto roomDto = LTUtility.toDto(savedChat, RoomDto.class);

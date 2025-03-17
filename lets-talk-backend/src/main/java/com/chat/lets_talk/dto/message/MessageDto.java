@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 public class MessageDto {
     private String id;
     private String sentBy;
-    @JsonFormat(shape = JsonFormat.Shape.STRING , pattern = "dd-MM-yyyy hh:mm:ss a")
-    private LocalDateTime msgTime;
+//    @JsonFormat(shape = JsonFormat.Shape.STRING , pattern = "dd-MM-yyyy hh:mm:ss a")
+//    private LocalDateTime msgTime;
     private String message;
 }
