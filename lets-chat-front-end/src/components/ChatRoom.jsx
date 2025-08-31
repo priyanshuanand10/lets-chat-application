@@ -1,6 +1,5 @@
-import { Button, Input } from '@material-tailwind/react';
+import { Button } from '@material-tailwind/react';
 import React, { useEffect, useRef, useState } from 'react';
-import Logout from "/logo/logout.png";
 import { MdAttachment, MdSend } from 'react-icons/md';
 import ChatCard from './ChatCard';
 import ChatCardMe from './ChatCardMe';
@@ -12,22 +11,21 @@ import { baseUrl } from '../configs/AxiosHelper';
 import { Stomp } from '@stomp/stompjs';
 import moment from 'moment';
 import { getMessageApi } from '../services/RoomService';
+import axios from 'axios';
 
 export default function ChatRoom() {
-    const { currUser, roomId, connected, setCurrUser, setRoomId, setConnected } = useChatContext();
+    const { currUser, roomId, connected } = useChatContext();
     const navigate = useNavigate();
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState("");
-    const inputRef = useRef(null);
-    const chatBotref = useRef(null);
-    const [stompClient, setStompClient] = useState(null);
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const stompClientRef = useRef(null);
     const endOfMessagesRef = useRef(null);
 
     useEffect(() => {
-        if (!connected) {
-            navigate("/");
-        }
-    }, [currUser, roomId, connected]);
+        if (!connected) navigate("/");
+    }, [currUser, roomId, connected, navigate]);
 
     useEffect(() => {
         const loadMsg = async () => {
@@ -35,26 +33,27 @@ export default function ChatRoom() {
                 const response = await getMessageApi(roomId);
                 setMessages(response);
             } catch (error) {
-                console.log(error);
-                toast.error(error.response.data.message);
+                toast.error(error?.response?.data?.message || "Failed to load messages");
             }
         };
         loadMsg();
-    }, []);
+    }, [roomId]);
 
     useEffect(() => {
         const connWebSocket = async () => {
             const sockJs = new SockJS(`${baseUrl}/chat`);
             const client = Stomp.over(sockJs);
             await client.connect({
-              "headers":{
-                  Authorization: 'Basic cHJpeWFtOnByaXlhbQ=='
-              }
+                "headers": {
+                    Authorization: 'Basic ' + btoa('priyam:priyam')
+                }
             }, () => {
-                setStompClient(client);
+                stompClientRef.current = client;
                 toast.success(`Connected to ${roomId}`);
                 client.subscribe(`/topic/room/${roomId}`, (message) => {
                     const newMsg = JSON.parse(message.body);
+                    // Debug: log received message
+                    console.log('Received message:', newMsg.body);
                     setMessages((prev) => [...prev, newMsg.body]);
                 });
             });
@@ -71,31 +70,86 @@ export default function ChatRoom() {
         navigate("/");
     };
 
-    const sendMsg = async () => {
-        if (connected && stompClient && input.trim()) {
-            const now = moment().format('DD-MM-YYYY hh:mm:ss A');
-            const messagenew = {
-                id: null,
-                sentBy: currUser,
-                message: input,
-                msgTime: now,
-            };
+    const handleFileChange = (e) => {
+        setSelectedFile(e.target.files[0]);
+    };
 
-            stompClient.send(`/app/add-message/${roomId}`, {}, JSON.stringify(messagenew));
-            setInput("");
-        } 
-        else if (connected && stompClient && input.length==0) {
-         
-            toast('please enter some text!', {
-                icon: '⚠️',
-              });
-        
-        } 
-        
-        else {
-            toast.error("Something went wrong, please try again later!!!");
-            exitRoom();
+    const sendMsg = async () => {
+        if (
+            !connected ||
+            !stompClientRef.current ||
+            !stompClientRef.current.connected
+        ) {
+            toast.error("WebSocket not connected. Please wait and try again!");
+            return;
         }
+        if (!input.trim() && !selectedFile) {
+            toast('please enter some text or attach a file!', { icon: '⚠️' });
+            return;
+        }
+
+        let fileId = '';
+        let fileName = '';
+        if (selectedFile) {
+            setUploading(true);
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            try {
+                const res = await axios.post(
+                    'http://localhost:8080/attachments/upload',
+                    formData,
+                    {
+                        headers: {
+                            'Authorization': 'Basic ' + btoa('priyam:priyam'),
+                        },
+                    }
+                );
+                fileId = res.data.id;
+                fileName = selectedFile.name;
+            } catch (err) {
+                toast.error('File upload failed');
+                setUploading(false);
+                return;
+            }
+            setUploading(false);
+        }
+
+        const now = moment().format('DD-MM-YYYY hh:mm:ss A');
+        const messagenew = {
+            id: null,
+            sentBy: currUser,
+            message: input,
+            msgTime: now,
+            fileName,
+            fileId,
+        };
+
+        // Log the sent message
+        console.log('Sent message:', messagenew);
+
+        stompClientRef.current.send(`/app/add-message/${roomId}`, {}, JSON.stringify(messagenew));
+        setInput("");
+        setSelectedFile(null);
+    };
+
+    const handleDownload = (id, name) => {
+        fetch(`http://localhost:8080/attachments/${id}/download`, {
+            method: 'GET',
+            headers: {
+                'Authorization': 'Basic ' + btoa('priyam:priyam'),
+            }
+        })
+            .then(response => response.blob())
+            .then(blob => {
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = name || '';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            })
+            .catch(() => toast.error('Download failed'));
     };
 
     return (
@@ -114,9 +168,23 @@ export default function ChatRoom() {
                     <div className="p-8 text-white rounded shadow-md h-full w-full max-w-lg overflow-auto">
                         {messages.map((msg, index) => (
                             <div key={index}>
-                                {currUser === msg.sentBy ? 
-                                    <ChatCardMe sender={msg.sentBy} message={msg.message} time={msg.msgTime} /> : 
-                                    <ChatCard sender={msg.sentBy} message={msg.message} time={msg.msgTime} />
+                                {currUser === msg.sentBy ?
+                                    <ChatCardMe
+                                        sender={msg.sentBy}
+                                        message={msg.message}
+                                        time={msg.msgTime}
+                                        fileName={msg.fileName}
+                                        fileId={msg.fileId}
+                                        onDownload={() => handleDownload(msg.fileId, msg.fileName)}
+                                    /> :
+                                    <ChatCard
+                                        sender={msg.sentBy}
+                                        message={msg.message}
+                                        time={msg.msgTime}
+                                        fileName={msg.fileName}
+                                        fileId={msg.fileId}
+                                        onDownload={() => handleDownload(msg.fileId, msg.fileName)}
+                                    />
                                 }
                             </div>
                         ))}
@@ -124,17 +192,35 @@ export default function ChatRoom() {
                     </div>
                 </main>
             </div>
-            <footer className='bottom-0 fixed w-[100%] p-[2%] flex justify-center'>
-                <input
-                    type="text"
-                    value={input}
-                    onChange={(e) => { setInput(e.target.value); }}
-                    placeholder="Type Your Message Here..."
-                    className="border border-gray-300 p-3 rounded-full w-full"
-                />
-                <Button className="bg-gray-1000 m-auto" onClick={sendMsg}>
-                    <MdSend className='size-7' />
-                </Button>
+            <footer className='bottom-0 fixed w-[100%] p-[2%] flex flex-col items-center bg-black border-t border-gray-300'>
+                {selectedFile && (
+                    <div className="mb-2 text-gray-200">
+                        Attached: {selectedFile.name}
+                        {uploading && <span> (Uploading...)</span>}
+                    </div>
+                )}
+                <div className="flex w-full items-center bg-gray-900 rounded-full px-3 py-2 shadow border border-gray-700">
+                    <label className="mr-2 flex items-center cursor-pointer">
+                        <input
+                            type="file"
+                            style={{ display: 'none' }}
+                            onChange={handleFileChange}
+                            disabled={uploading}
+                        />
+                        <MdAttachment className="size-7 text-white hover:text-blue-400" />
+                    </label>
+                    <input
+                        type="text"
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        placeholder="Type Your Message Here..."
+                        className="border-none p-3 rounded-full w-full bg-transparent text-white focus:outline-none"
+                        disabled={uploading}
+                    />
+                    <Button className="bg-blue-600 ml-2 rounded-full px-4 py-2 text-white" onClick={sendMsg} disabled={uploading || (!input.trim() && !selectedFile)}>
+                        <MdSend className='size-7' />
+                    </Button>
+                </div>
             </footer>
         </div>
     );
